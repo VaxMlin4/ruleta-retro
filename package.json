@@ -1,0 +1,23 @@
+{
+  "name": "ruleta-retro",
+  "version": "1.0.0",
+  "description": "Disco y Destino 70's — app web local de sorteos (Disco nocturno)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test:engine": "node scripts/test-engine.js",
+    "test:e2e": "node scripts/test-e2e.js",
+    "seed-templates": "node scripts/seed-templates.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^11.0.5"
+  },
+  "private": true
+}
