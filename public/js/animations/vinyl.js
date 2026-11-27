@@ -4,12 +4,16 @@ window.VinylAnim = {
     host.innerHTML = this._vinylSvg(false);
   },
 
-  mountWheel(host, prizes, winnerId) {
-    const n = Math.max(prizes.length, 1);
+  mountWheel(host, prizes, winnerId, opts = {}) {
+    const shown = this._shownPrizes(prizes, winnerId);
+    const n = Math.max(shown.length, 1);
     const colors = ['#FFE5B8', '#912C70', '#481D40', '#F47D20', '#FFC354', '#6b2048', '#c45a20'];
     const paths = [];
     const labels = [];
-    prizes.forEach((p, i) => {
+    const clips = [];
+    const chord = Math.max(26, 2 * 126 * Math.sin(Math.PI / n) * 0.72);
+    const band = 46;
+    shown.forEach((p, i) => {
       const a0 = (i / n) * Math.PI * 2 - Math.PI / 2;
       const a1 = ((i + 1) / n) * Math.PI * 2 - Math.PI / 2;
       const large = n > 1 && 1 / n > 0.5 ? 1 : 0;
@@ -32,24 +36,33 @@ window.VinylAnim = {
       const tx = 200 + Math.cos(mid) * 154;
       const ty = 200 + Math.sin(mid) * 154;
       const rot = ((i + 0.5) / n) * 360;
-      const label = this._short(p.nombre, 16);
+      const fitted = this._fitLabel(p.nombre, chord, band);
+      clips.push(`<clipPath id="vw-seg-${i}"><path d="${d}"/></clipPath>`);
       const out = !!p.agotado && p.id !== winnerId;
-      const fill = out ? '#6a6274' : colors[i % colors.length];
-      const text = out ? '#ddd6e2' : '#fff';
+      const fill = out ? '#6a6274' : (p.color || colors[i % colors.length]);
+      const text = out ? '#ddd6e2' : this._ink(fill);
       const opacity = out ? '0.92' : '0.95';
       paths.push(
-        `<path class="seg${out ? ' is-out' : ''}" data-id="${p.id}" d="${d}" fill="${fill}" stroke="${out ? '#3a3442' : '#241225'}" stroke-width="2" opacity="${opacity}"/>`
+        `<path class="seg${out ? ' is-out' : ''}" data-id="${this._xml(p.id)}" d="${d}" fill="${fill}" stroke="${out ? '#3a3442' : '#241225'}" stroke-width="2" opacity="${opacity}"/>`
       );
+      const lineH = fitted.size * 1.08;
+      const tspans = fitted.lines
+        .map(
+          (line, li) =>
+            `<tspan x="${tx}" dy="${li === 0 ? (-(fitted.lines.length - 1) * lineH) / 2 : lineH}">${this._xml(line)}</tspan>`
+        )
+        .join('');
       labels.push(
-        `<text data-id="${p.id}" x="${tx}" y="${ty}" fill="${text}" font-size="15" font-family="Georgia, serif" font-style="italic"
+        `<g clip-path="url(#vw-seg-${i})"><text data-id="${this._xml(p.id)}" x="${tx}" y="${ty}" fill="${text}" font-size="${fitted.size}" font-family="Georgia, serif" font-style="italic"
           text-anchor="middle" dominant-baseline="middle" opacity="${out ? '0.8' : '1'}"
-          transform="rotate(${rot}, ${tx}, ${ty})">${label}</text>`
+          transform="rotate(${rot}, ${tx}, ${ty})">${tspans}</text></g>`
       );
     });
 
     host.innerHTML = `
       <svg class="vinyl-svg" viewBox="0 0 400 400" id="ruleta-svg">
         ${this._vinylDefs('vw')}
+        <defs>${clips.join('')}</defs>
         <g id="ring-rot">
           ${paths.join('')}
           ${this._prizeTexture('vw')}
@@ -68,21 +81,24 @@ window.VinylAnim = {
     // Spec: antihorario. In SVG/CSS, negative rotation is CCW.
     const winnerIdx = Math.max(
       0,
-      prizes.findIndex((p) => p.id === winnerId)
+      shown.findIndex((p) => p.id === winnerId)
     );
     const segAngle = 360 / n;
     // Center of winner segment in unrotated ring: winnerIdx * segAngle + segAngle/2, measured clockwise from top
     const winnerCenterFromTop = winnerIdx * segAngle + segAngle / 2;
     // To bring winnerCenter to top (0), rotate CCW by winnerCenterFromTop → negative angle
     // Extra full spins for drama
-    const extraSpins = 5 + Math.floor(Math.random() * 2); // visual only; result already fixed
-    const finalAngle = -(extraSpins * 360 + winnerCenterFromTop);
+    const extraSpins = opts.spins || 4;
+    const dir = opts.direction === 1 ? 1 : -1;
+    const travel = dir < 0 ? winnerCenterFromTop : (360 - (winnerCenterFromTop % 360)) % 360;
+    const finalAngle = dir * (extraSpins * 360 + travel);
 
     return { finalAngle, winnerIdx, n };
   },
 
-  async spin(host, prizes, winnerId, onDone) {
-    const meta = this.mountWheel(host, prizes, winnerId);
+  async spin(host, prizes, winnerId, onDone, opts = {}) {
+    const duration = opts.duration || 6.2;
+    const meta = this.mountWheel(host, prizes, winnerId, opts);
     const ring = host.querySelector('#ring-rot');
     const lights = host.querySelectorAll('#vw-light, #vw-prize-light');
     const wrap = host.closest('.ruleta-wheel-wrap');
@@ -90,33 +106,34 @@ window.VinylAnim = {
     lights.forEach((light) => {
       gsap.killTweensOf(light);
       gsap.set(light, { rotation: -16, svgOrigin: '200 200' });
-      gsap.to(light, { rotation: 28, duration: 8.5, ease: 'sine.inOut', svgOrigin: '200 200' });
+      gsap.to(light, { rotation: 28, duration, ease: 'sine.inOut', svgOrigin: '200 200' });
     });
     if (wrap) {
       gsap.killTweensOf(wrap);
-      gsap.set(wrap, { scale: 1, transformOrigin: '50% 4%' });
-      gsap.to(wrap, {
-        scale: 2.15,
-        duration: 1.45,
-        delay: 0.55,
-        ease: 'power2.inOut',
-      });
+      const zoom = opts.zoom || 'in';
+      gsap.set(wrap, { transformOrigin: '50% 4%' });
+      if (zoom === 'out') {
+        gsap.to(wrap, { scale: 1, duration: 1.5, delay: 0.2, ease: 'power2.inOut' });
+      } else if (zoom === 'hold') {
+        gsap.set(wrap, { scale: 2.15 });
+      } else {
+        gsap.set(wrap, { scale: 1 });
+        gsap.to(wrap, { scale: 2.15, duration: 1.45, delay: 0.55, ease: 'power2.inOut' });
+      }
     }
 
-    // Phase 1: accelerate ~4s, then decelerate ~4.5s
     await new Promise((resolve) => {
       gsap.to(ring, {
         rotation: meta.finalAngle,
-        duration: 8.5,
-        ease: 'power3.out', // ease-out without bounce
+        duration,
+        ease: 'power3.out',
         onComplete: resolve,
         svgOrigin: '200 200',
       });
     });
 
-    const seg = host.querySelector(`.seg[data-id="${CSS.escape(String(winnerId))}"]`);
-    if (seg) {
-      const path = seg;
+    const marked = [host.querySelector(`.seg[data-id="${CSS.escape(String(winnerId))}"]`)].filter(Boolean);
+    marked.forEach((path) => {
       gsap.to(path, {
         attr: { stroke: '#FFC354', 'stroke-width': 4 },
         filter: 'url(#glow)',
@@ -128,13 +145,94 @@ window.VinylAnim = {
         { opacity: 0.7 },
         { opacity: 1, duration: 0.4, yoyo: true, repeat: 3 }
       );
-    }
+    });
     if (onDone) onDone();
   },
 
-  _short(s, n) {
-    s = String(s || '');
-    return s.length > n ? s.slice(0, n - 1) + '…' : s;
+  _ink(hex) {
+    const h = String(hex || '').replace('#', '');
+    if (h.length < 6) return '#fff';
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    if ([r, g, b].some((n) => Number.isNaN(n))) return '#fff';
+    return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#241225' : '#fff';
+  },
+
+  _splitWords(words, lineCount) {
+    const n = Math.min(lineCount, words.length);
+    const lines = [];
+    let index = 0;
+    for (let i = 0; i < n; i += 1) {
+      const slots = n - i;
+      const rest = words.length - index;
+      let take = rest;
+      if (slots > 1) {
+        const budget = words.slice(index).join(' ').length / slots;
+        let length = 0;
+        take = 0;
+        while (take < rest - (slots - 1)) {
+          const next = words[index + take];
+          const nextLen = length + (take ? 1 : 0) + next.length;
+          if (take > 0 && nextLen > budget) break;
+          length = nextLen;
+          take += 1;
+        }
+      }
+      lines.push(words.slice(index, index + take).join(' '));
+      index += take;
+    }
+    return lines.filter(Boolean);
+  },
+
+  _fitLabel(nombre, maxWidth, maxHeight) {
+    const words = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return { size: 11, lines: [''] };
+    const widthOf = (text, size) => Math.max(text.length, 1) * size * 0.84;
+    const heightOf = (count, size) => count * size * 1.18;
+    const limitH = maxHeight || 46;
+    for (let size = 12; size >= 5.5; size -= 0.5) {
+      if (widthOf(words.join(' '), size) <= maxWidth && heightOf(1, size) <= limitH) {
+        return { size, lines: [words.join(' ')] };
+      }
+      const maxLines = Math.min(3, words.length);
+      for (let count = 2; count <= maxLines; count += 1) {
+        if (heightOf(count, size) > limitH) continue;
+        const chunks = this._splitWords(words, count);
+        if (chunks.every((line) => widthOf(line, size) <= maxWidth)) return { size, lines: chunks };
+      }
+    }
+    return { size: 5.5, lines: this._splitWords(words, Math.min(3, words.length)) };
+  },
+
+  _xml(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  },
+
+  /**
+   * La ruleta es la presentación: el premio ya está elegido.
+   * Con muchos registros, muestra hasta 12 segmentos legibles e incluye siempre al ganador.
+   */
+  _shownPrizes(prizes, winnerId) {
+    const MAX = 16;
+    const list = Array.isArray(prizes) ? prizes : [];
+    const live = list.filter((p) => p.pinned || p.id === winnerId || !p.agotado);
+    const gray = list.filter((p) => !live.includes(p));
+    if (live.length >= MAX) return live;
+    return [...live, ...gray.slice(0, MAX - live.length)];
+  },
+
+  _norm(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   },
 
   _vinylSvg() {

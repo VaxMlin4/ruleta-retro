@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { executeDraw, releaseAnimationLock, getSorteoById } = require('../services/drawEngine');
+const { executeDrawBatch, releaseAnimationLock, getSorteoById, readCurrentLote } = require('../services/drawEngine');
 const { canDrawNow } = require('../services/sistemasQuota');
 const { getEvent } = require('../db');
 
@@ -18,7 +18,7 @@ router.post('/', (_req, res) => {
         locked: !!check.locked,
       });
     }
-    const result = executeDraw();
+    const result = executeDrawBatch(3);
     res.json(result);
   } catch (e) {
     const status = e.status || 500;
@@ -45,9 +45,9 @@ router.post('/continue', (_req, res) => {
 
 router.get('/current', (_req, res) => {
   const event = getEvent();
-  if (!event?.sorteo_actual_id) return res.json({ ok: true, sorteo: null });
-  const sorteo = getSorteoById(event.sorteo_actual_id);
-  res.json({ ok: true, sorteo, animacionEnCurso: !!event.animacion_en_curso });
+  const lote = readCurrentLote();
+  const sorteo = lote[0] || (event?.sorteo_actual_id ? getSorteoById(event.sorteo_actual_id) : null);
+  res.json({ ok: true, sorteo, lote, animacionEnCurso: !!event?.animacion_en_curso });
 });
 
 router.get('/:id', (req, res) => {

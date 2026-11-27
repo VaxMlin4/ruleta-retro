@@ -35,7 +35,7 @@ function getTotalInitialUnits() {
 }
 
 /**
- * Viabilidad pre-inicio + determinación de cuota Sistemas.
+ * Viabilidad pre-inicio + determinación de cuota Sistemas de Información.
  * Returns { ok, errors, warnings, cuota, elegibles, unidades, probsSummary }
  */
 function assessViability({ chooseCuota = false } = {}) {
@@ -59,27 +59,27 @@ function assessViability({ chooseCuota = false } = {}) {
 
   let cuota = null;
   if (!sistemas) {
-    warnings.push('No se detectó área Sistemas; la cuota Sistemas no aplica.');
+    warnings.push('No se detectó área Sistemas de Información; la cuota no aplica.');
     cuota = 0;
-  } else if (sistemasElegibles < 4) {
+  } else if (sistemasElegibles < 2) {
     errors.push(
-      `Área Sistemas tiene solo ${sistemasElegibles} elegibles; se requieren al menos 4 para la cuota 4–5.`
+      `Área Sistemas de Información tiene solo ${sistemasElegibles} elegibles; se requieren al menos 2 para la cuota 2–3.`
     );
-  } else if (unidades < 4) {
-    errors.push('Inventario insuficiente para cumplir cuota mínima de Sistemas (4).');
+  } else if (unidades < 2) {
+    errors.push('Inventario insuficiente para cumplir cuota mínima de Sistemas de Información (2).');
   } else {
-    const maxPossible = Math.min(5, sistemasElegibles, unidades);
-    if (maxPossible < 4) {
-      errors.push('No es posible cumplir cuota Sistemas 4–5 con el inventario/elegibles actuales.');
-    } else if (sistemasElegibles >= 5 && unidades >= 5) {
+    const maxPossible = Math.min(3, sistemasElegibles, unidades);
+    if (maxPossible < 2) {
+      errors.push('No es posible cumplir cuota Sistemas de Información 2–3 con el inventario/elegibles actuales.');
+    } else if (sistemasElegibles >= 3 && unidades >= 3) {
       if (chooseCuota) {
-        cuota = cryptoInt(2) === 0 ? 4 : 5; // crypto elige 4 o 5
+        cuota = cryptoInt(2) === 0 ? 2 : 3; // crypto elige 2 o 3
       } else {
         cuota = null; // se elegirá al iniciar
       }
     } else {
-      // solo 4 elegibles o inventario solo alcanza 4
-      cuota = 4;
+      // solo 2 elegibles o inventario solo alcanza 2
+      cuota = 2;
     }
   }
 
@@ -94,10 +94,10 @@ function assessViability({ chooseCuota = false } = {}) {
     warnings,
     cuota,
     cuotaRango:
-      sistemas && sistemasElegibles >= 5 && unidades >= 5
-        ? '4 o 5 (se elige al iniciar con crypto)'
-        : cuota === 4
-          ? '4 (fija)'
+      sistemas && sistemasElegibles >= 3 && unidades >= 3
+        ? '2 o 3 (se elige al iniciar con crypto)'
+        : cuota === 2
+          ? '2 (fija)'
           : cuota === 0
             ? 'no aplica'
             : 'no viable',
@@ -128,7 +128,7 @@ function applyCuotaOnStart(eventId) {
     sistemasElegibles: assessment.sistemasElegibles,
     warnings: assessment.warnings,
     modelo:
-      'premio ponderado por unidades; área ponderada por elegibles (Sistemas excluida al alcanzar cuota); colaborador uniforme',
+      'premio ponderado por unidades; área ponderada por elegibles (Sistemas de Información excluida al alcanzar cuota); colaborador uniforme',
   };
   db.prepare(
     `UPDATE eventos SET estado = 'en_curso', sistemas_cuota_objetivo = ?, sistemas_ganadores = 0,

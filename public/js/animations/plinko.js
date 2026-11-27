@@ -40,6 +40,33 @@
     return h >>> 0;
   }
 
+  function separateBalls(points, minDist) {
+    const next = points.map((point) => ({ x: point.x, y: point.y }));
+    for (let pass = 0; pass < 8; pass += 1) {
+      for (let i = 0; i < next.length; i += 1) {
+        for (let j = i + 1; j < next.length; j += 1) {
+          let dx = next[j].x - next[i].x;
+          let dy = next[j].y - next[i].y;
+          let dist = Math.hypot(dx, dy);
+          if (dist < 0.001) {
+            dx = (i + j) % 2 === 0 ? 1 : -1;
+            dy = 0.35;
+            dist = Math.hypot(dx, dy);
+          }
+          if (dist >= minDist) continue;
+          const push = (minDist - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          next[i].x -= nx * push;
+          next[i].y -= ny * push;
+          next[j].x += nx * push;
+          next[j].y += ny * push;
+        }
+      }
+    }
+    return next;
+  }
+
   function clamp(v, a, b) {
     return Math.max(a, Math.min(b, v));
   }
@@ -94,6 +121,37 @@
     return { w, pitch, origin: Math.max(0, (usable - rowWidth) / 2) };
   }
 
+  function splitPocketLines(words) {
+    if (!words.length) return ['Área'];
+    const lines = words.slice();
+    while (lines.length > 4) {
+      let best = 0;
+      let bestLen = Infinity;
+      for (let i = 0; i < lines.length - 1; i += 1) {
+        const len = lines[i].length + lines[i + 1].length;
+        if (len < bestLen) {
+          bestLen = len;
+          best = i;
+        }
+      }
+      lines.splice(best, 2, lines[best] + ' ' + lines[best + 1]);
+    }
+    return lines;
+  }
+
+  function pocketCopy(nombre, width) {
+    const words = String(nombre || 'Área')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    const lines = splitPocketLines(words);
+    const inner = Math.max(44, width - 42);
+    const longest = lines.reduce((max, line) => Math.max(max, line.length), 1);
+    const size = clamp(inner / (longest * 1.05), 6, 12);
+    const h = clamp(Math.ceil(lines.length * size * 1.12 + 30), CFG.pocketH, 120);
+    return { lines, size, h };
+  }
+
   function layoutBoard(areas, boardWidth) {
     const width = Math.max(340, Math.min(960, Math.round(boardWidth || 880)));
     const source = (areas || []).map((a) => ({
@@ -119,6 +177,7 @@
         const area = source[index] || { id: 'area', nombre: 'Área', dimmed: false };
         index += 1;
         const w = metrics.w;
+        const copy = pocketCopy(area.nombre, w);
         const mouth = clamp(w * 0.42, CFG.ballR * 2 + 8, 72);
         const x = clamp(
           CFG.margin + edge + metrics.origin + shift + extra + w / 2 + col * metrics.pitch,
@@ -132,7 +191,9 @@
           row,
           col,
           w,
-          h: CFG.pocketH,
+          h: copy.h,
+          lines: copy.lines,
+          fontSize: copy.size,
           mouth,
           x,
           y: CFG.firstPocketY + row * CFG.band,
@@ -373,11 +434,10 @@
     const dy = y1 - y0;
     const dx = x1 - x0;
     const tFloor = Math.sqrt(Math.max(0, (2 * Math.max(dy, 0)) / g)) + 0.04;
-    const lob = rng() < 0.18;
-    const extra = lob ? 0.26 + rng() * 0.22 : Math.pow(rng(), 1.35) * 0.24 + 0.05;
-    let t = clamp(tFloor + extra, 0.16, 0.72);
+    const extra = 0.02 + rng() * 0.05;
+    let t = clamp(tFloor + extra, 0.1, 0.34);
     let vy0 = (dy - 0.5 * g * t * t) / t;
-    const cap = maxRise == null ? 72 : maxRise;
+    const cap = Math.min(maxRise == null ? 22 : maxRise, 26);
     let guard = 0;
     while (vy0 < 0 && (vy0 * vy0) / (2 * g) > cap && guard < 6) {
       t = Math.max(tFloor + 0.02, t * 0.8);
@@ -503,15 +563,17 @@
     return { samples, rot };
   }
 
-  function weaveDown(layout, winner, rng, samples, hits) {
+  function weaveDown(layout, winner, rng, samples, hits, lane) {
     const g = CFG.gravity;
     const used = new Set();
-    let x = layout.width / 2 + (rng() - 0.5) * 28;
+    const laneX = Number.isFinite(lane) ? lane : 0;
+    let x = clamp(layout.width / 2 + laneX, CFG.margin + 36, layout.width - CFG.margin - 36);
+    const home = x;
     let y = 34;
     let rot = (rng() - 0.5) * 20;
     let incomingVx = rng() < 0.5 ? -140 : 140;
     let hops = 0;
-    const hold = 10 + Math.floor(rng() * 8);
+    const hold = 16;
     for (let i = 0; i < hold; i++) samples.push({ x, y, rot, vx: 0, vy: 0 });
 
     const rows = [];
@@ -557,7 +619,7 @@
       const nx = clamp(x1, CFG.ballR + 2, layout.width - CFG.ballR - 2);
       const ny = y1;
       if (Math.hypot(nx - x, ny - y) < 1.2) return true;
-      if (Math.hypot(nx - x, ny - y) > 110) {
+      if (Math.hypot(nx - x, ny - y) > 56) {
         return commit((x + nx) / 2, (y + ny) / 2, allowWinner, maxRise) && commit(nx, ny, allowWinner, maxRise);
       }
       const arc = sampleHop(x, y, nx, ny, rot, rng, g, maxRise);
@@ -584,40 +646,29 @@
       return true;
     }
 
-    function lateral(goalX, yLimit) {
-      const y0 = y;
-      const x0 = x;
-      const span = yLimit - y0;
-      if (span < 12) {
-        if (Math.abs(x - goalX) > 6) commit(goalX, y, false, riseCap(y));
-        return;
-      }
-      const n = span > 170 ? 4 : span > 95 ? 3 : 2;
-      for (let i = 1; i <= n; i++) {
-        const u = i / n;
-        const guide = x0 + (goalX - x0) * u;
-        const swing =
-          i === n
-            ? 0
-            : (1 - u * 0.4) * (n >= 4 ? layout.width * 0.2 : layout.width * 0.13) * (0.85 + rng() * 0.3);
-        const side = i % 2 === 0 ? 1 : -1;
-        const aim =
-          i === n
-            ? goalX
-            : clamp(guide + side * swing, CFG.margin + 18, layout.width - CFG.margin - 18);
-        const ny = y0 + span * u;
-        const pegs = pickSidePeg(x, y, ny + 20, layout, rng, used, aim);
+    function wander(untilY, biasX, strength, loose) {
+      const pull = clamp(strength, 0, 0.8);
+      let guard = 0;
+      while (y < untilY - 8 && guard < 42) {
+        guard += 1;
+        const side = rng() < 0.5 ? -1 : 1;
+        const kick = side * (16 + rng() * 22);
+        let aim = x * (1 - pull) + biasX * pull + kick;
+        if (!loose) aim = clamp(aim, biasX - 70, biasX + 70);
+        aim = clamp(aim, CFG.margin + 18, layout.width - CFG.margin - 18);
+        const ny = Math.min(untilY, y + 28 + rng() * 18);
+        const pegs = pickSidePeg(x, y, ny + 16, layout, rng, used, aim);
         let bounced = false;
         for (const peg of pegs) {
-          if (Math.abs(peg.x - aim) > 64 || Math.abs(peg.x - x) < 42) continue;
-          if (bouncePeg(peg, false, riseCap(y))) {
+          if (Math.abs(peg.x - x) > 70) continue;
+          if (rng() < 0.28) continue;
+          if (bouncePeg(peg, false, 20)) {
             bounced = true;
             break;
           }
         }
-        if (Math.abs(x - aim) > 24 || !bounced) commit(aim, Math.max(ny, y + 6), false, riseCap(y));
+        if (!bounced) commit(aim, Math.max(ny, y + 8), false, 18);
       }
-      if (Math.abs(x - goalX) > 8) commit(goalX, Math.max(yLimit, y), false, riseCap(y));
     }
 
     function descend(x0, x1, yTo, allowWinner) {
@@ -633,8 +684,9 @@
       let guard = 0;
       while (y < yTo - 12 && guard < 7) {
         guard++;
-        const ny = Math.min(yTo, y + 24 + rng() * 20);
-        const nx = clamp(toRight ? right - 1 : left + 1, left, right);
+        const ny = Math.min(yTo, y + 22 + rng() * 12);
+        const edge = toRight ? right - 1 : left + 1;
+        const nx = clamp(x + Math.sign(edge - x || 1) * Math.min(Math.abs(edge - x), 36), left, right);
         if (!commit(nx, ny, allowWinner, 8)) {
           if (!commit(clamp(x, left, right), ny, allowWinner, 6)) break;
         }
@@ -655,40 +707,23 @@
       const laneY = top - CFG.ballR - 18;
       const belowY = bottom + CFG.ballR + 14;
       const channels = channelsFor(rowPockets, layout.width);
-      let goalX = winner.x;
-      if (row !== winner.row && channels.length) {
-        const lastGap = winner.row - 1;
-        const left = CFG.margin + 24;
-        const right = layout.width - CFG.margin - 24;
-        const opposite = Math.abs(winner.x - left) > Math.abs(winner.x - right) ? left : right;
-        const beside = opposite === left ? right : left;
-        let target = winner.x;
-        if (lastGap > 1 && row < lastGap) {
-          const u = row / lastGap;
-          const edge = row % 2 === 0 ? opposite : beside;
-          const pull = u * 0.75;
-          target = edge * (1 - pull) + winner.x * pull;
-        }
-        const channel = nearestChannel(channels, target + (rng() - 0.5) * 12);
-        goalX = channel.mid;
-      }
-
-      lateral(goalX, laneY);
 
       if (row === winner.row) {
+        wander(laneY, winner.x, 0.62, true);
         const half = Math.max(5, winner.mouth / 2 - CFG.ballR - 1);
         descend(winner.x - half, winner.x + half, winner.y + CFG.ballR + 8, true);
         break;
       }
-      const channel = nearestChannel(channels, goalX) || channels[0];
+      wander(laneY, home, 0.55);
+      const channel = nearestChannel(channels, x + (rng() - 0.5) * 36) || channels[0];
       if (channel) descend(channel.x0, channel.x1, belowY, false);
-      else commit(goalX, belowY, false, 10);
+      else commit(x, belowY, false, 12);
     }
 
     const restY = winner.y + CFG.ballR + 8;
     if (Math.abs(x - winner.x) > 8 || y < winner.y + 4) {
       const laneY = winner.y - CFG.ballR - 18;
-      if (y < laneY) lateral(winner.x, laneY);
+      if (y < laneY) wander(laneY, winner.x, 0.7, true);
       descend(
         winner.x - Math.max(5, winner.mouth / 2 - CFG.ballR - 1),
         winner.x + Math.max(5, winner.mouth / 2 - CFG.ballR - 1),
@@ -699,13 +734,13 @@
     return { rot, hops };
   }
 
-  function planDrop(layout, winnerId, seed) {
+  function planDrop(layout, winnerId, seed, lane) {
     const winner = pocketAt(layout, winnerId);
     const numeric = typeof seed === 'number' ? seed >>> 0 : hashString(seed);
     const rng = mulberry32(numeric || 1);
     const samples = [];
     const hits = [];
-    const woven = weaveDown(layout, winner, rng, samples, hits);
+    const woven = weaveDown(layout, winner, rng, samples, hits, lane);
     samples.push(...settleSamples(winner.x, winner.y + CFG.ballR + 8, woven.rot, rng));
 
     let crossed = false;
@@ -723,8 +758,9 @@
     };
   }
 
-  function applyCamera(world, cam, scale, offsetX) {
-    world.style.transform = `translate(${offsetX}px, ${-cam * scale}px) scale(${scale})`;
+  function applyCamera(world, cam, scale, offsetX, offsetY) {
+    const y = offsetY == null ? -cam * scale : offsetY;
+    world.style.transform = `translate(${offsetX}px, ${y}px) scale(${scale})`;
   }
 
   function pocketLights(w, h) {
@@ -775,7 +811,10 @@
     const pockets = layout.pockets
       .map((p) => {
         const cls = p.dimmed ? 'plinko-pocket is-dim' : 'plinko-pocket';
-        return `<div class="${cls}" data-id="${escapeHtml(p.id)}" style="left:${(p.x - p.w / 2).toFixed(1)}px;top:${p.y.toFixed(1)}px;width:${p.w.toFixed(1)}px;height:${p.h}px" title="${escapeHtml(p.nombre)}">${pocketArch()}${pocketLights(p.w, p.h)}<span>${escapeHtml(p.nombre)}</span></div>`;
+        const lines = (p.lines && p.lines.length ? p.lines : [p.nombre])
+          .map((line) => `<b>${escapeHtml(line)}</b>`)
+          .join('');
+        return `<div class="${cls}" data-id="${escapeHtml(p.id)}" style="left:${(p.x - p.w / 2).toFixed(1)}px;top:${p.y.toFixed(1)}px;width:${p.w.toFixed(1)}px;height:${p.h}px" title="${escapeHtml(p.nombre)}">${pocketArch()}${pocketLights(p.w, p.h)}<span class="pocket-name" style="font-size:${(p.fontSize || 12).toFixed(1)}px">${lines}</span></div>`;
       })
       .join('');
     const mid = layout.width / 2;
@@ -816,9 +855,12 @@
       let stopped = false;
       let settled = false;
       let ticker = null;
+      let landingHold = null;
       const camState = { y: 0 };
       const stop = () => {
         stopped = true;
+        if (landingHold) landingHold.kill();
+        finish({ aborted: true });
       };
       host._plinkoStop = stop;
 
@@ -826,6 +868,7 @@
         if (settled) return;
         settled = true;
         if (ticker) gsap.ticker.remove(ticker);
+        if (landingHold) landingHold.kill();
         gsap.killTweensOf(camState);
         if (host._plinkoStop === stop) host._plinkoStop = null;
         resolve(payload);
@@ -838,11 +881,262 @@
         .slice()
         .sort()
         .join('|');
-      if (!layout || layout._key !== ids) {
+      const key = ids + '@' + Math.round(boardW / 80) + '@texto2';
+      if (!layout || layout._key !== key) {
         layout = layoutBoard(areas, boardW);
-        layout._key = ids;
+        layout._key = key;
       } else {
         syncDim(layout, areas);
+      }
+
+      function sampleAt(plan, time) {
+        if (time <= 0) {
+          const first = plan.samples[0];
+          return { x: first.x, y: first.y, rot: first.rot || 0, done: false };
+        }
+        const dt = plan.dt;
+        const max = plan.samples.length - 1;
+        const idx = Math.min(max, Math.floor(time / dt));
+        const next = Math.min(max, idx + 1);
+        const frac = idx >= max ? 0 : time / dt - idx;
+        const a = plan.samples[idx];
+        const b = plan.samples[next];
+        return {
+          x: a.x + (b.x - a.x) * frac,
+          y: a.y + (b.y - a.y) * frac,
+          rot: a.rot + (b.rot - a.rot) * frac,
+          done: idx >= max,
+        };
+      }
+
+      function runBalls(specs) {
+        const plans = specs.map((spec, index) => {
+          const lane = (index - (specs.length - 1) / 2) * layout.width * 0.32;
+          return planDrop(layout, spec.winnerId, spec.seed || spec.winnerId || String(index), lane);
+        });
+        host.innerHTML = render(layout);
+        const world = host.querySelector('.plinko-world');
+        const stockBall = host.querySelector('.plinko-ball');
+        const stockTrail = host.querySelector('.plinko-trail');
+        if (stockTrail) stockTrail.remove();
+        if (stockBall) stockBall.remove();
+        const nodes = specs.map((spec) => {
+          const el = document.createElement('div');
+          el.className = 'plinko-ball';
+          el.innerHTML = '<i></i>';
+          el.style.background = `radial-gradient(circle at 32% 28%, #fff 0 8%, ${spec.color} 48%, #2a1020 100%)`;
+          el.style.boxShadow = `inset -4px -5px 8px rgba(40, 16, 24, 0.45), 0 8px 12px rgba(0,0,0,.35), 0 0 14px ${spec.color}`;
+          world.appendChild(el);
+          return el;
+        });
+        const radius = CFG.ballR;
+        const minDist = radius * 2 + 2;
+        const pegNodes = host.querySelectorAll('.plinko-peg');
+        const trails = specs.map((spec) => {
+          const box = document.createElement('div');
+          box.className = 'plinko-trail';
+          box.innerHTML = '<i></i><i></i><i></i><i></i><i></i>';
+          box.querySelectorAll('i').forEach((dot) => {
+            dot.style.background = spec.color;
+            dot.style.boxShadow = `0 0 8px ${spec.color}`;
+          });
+          world.insertBefore(box, nodes[0]);
+          return box;
+        });
+        const positions = plans.map((plan) => ({ x: plan.samples[0].x, y: plan.samples[0].y, rot: plan.samples[0].rot || 0 }));
+        const offsets = specs.map(() => ({ x: 0, y: 0 }));
+        const clocks = specs.map(() => 0);
+        const cursors = plans.map(() => 0);
+        const tucked = specs.map(() => false);
+        const histories = specs.map(() => []);
+        const longest = Math.max(
+          ...plans.map((plan) => Math.max(plan.dt, (plan.samples.length - 1) * plan.dt))
+        );
+        const desired = clamp(6.4 + layout.rows * 0.18, 6.8, 8.2);
+        const rate = clamp(longest / desired, 0.8, 1.08);
+        const pockets = plans.map((plan) => pocketAt(layout, plan.winnerId));
+        let arrived = false;
+        let shownScale = 0;
+        let smoothCenter = 0;
+        let smoothSpan = 0;
+        let lockedView = null;
+        let justSettled = null;
+        const camState = { y: 0 };
+        world.style.transformOrigin = 'top left';
+
+        function glide(current, target, delta, dead, speed) {
+          const gap = target - current;
+          if (Math.abs(gap) < dead) return current + gap * 0.02;
+          const step = Math.min(Math.abs(gap), speed * Math.max(delta, 0.016));
+          return current + Math.sign(gap) * step;
+        }
+
+        function frameBalls(delta) {
+          if (lockedView) return lockedView;
+          const falling = [];
+          for (let i = 0; i < positions.length; i += 1) {
+            if (!tucked[i]) falling.push(positions[i]);
+          }
+          const focus = falling.length ? falling : justSettled ? [justSettled] : positions;
+          const viewW = host.clientWidth || layout.width;
+          const viewH = host.clientHeight || 640;
+          const widthScale = viewW / layout.width || 1;
+          let minY = focus[0].y;
+          let maxY = focus[0].y;
+          for (const point of focus) {
+            minY = Math.min(minY, point.y - 86);
+            maxY = Math.max(maxY, point.y + 120);
+          }
+          const center = (minY + maxY) / 2;
+          const span = Math.max(220, maxY - minY);
+          if (!smoothCenter) {
+            smoothCenter = center;
+            smoothSpan = span;
+          }
+          const step = delta || 0.016;
+          smoothCenter = glide(smoothCenter, center, step, 28, 108);
+          smoothSpan = glide(smoothSpan, span, step, 40, 60);
+          const fitScale = Math.min(widthScale, viewH / smoothSpan);
+          if (!shownScale) shownScale = fitScale;
+          else if (fitScale < shownScale) shownScale = glide(shownScale, fitScale, step, 0.02, 0.06);
+          const scale = shownScale;
+          const offsetX = (viewW - layout.width * scale) / 2;
+          const viewVirtual = viewH / scale;
+          const cam = clamp(smoothCenter - viewVirtual / 2, 0, Math.max(0, layout.height - viewVirtual));
+          const frame = { scale, offsetX, cam };
+          if (!falling.length) lockedView = frame;
+          return frame;
+        }
+
+        function paintMany() {
+          nodes.forEach((el, index) => {
+            const s = positions[index];
+            el.style.width = radius * 2 + 'px';
+            el.style.height = radius * 2 + 'px';
+            el.style.transform = `translate(${s.x - radius}px, ${s.y - radius}px) rotate(${s.rot}deg)`;
+          });
+        }
+
+        function finishMany() {
+          plans.forEach((plan) => {
+            const node = host.querySelector(`.plinko-pocket[data-id="${CSS.escape(String(plan.winnerId))}"]`);
+            if (node) node.classList.add('is-win');
+          });
+          const pockets = plans.map((plan) => pocketAt(layout, plan.winnerId));
+          if (options.onArrive) options.onArrive(pockets);
+          finish({ aborted: false, layout, pockets });
+        }
+
+        paintMany();
+        const firstView = frameBalls();
+        applyCamera(world, firstView.cam, firstView.scale, firstView.offsetX);
+
+        const tickerMany = function tick(_time, deltaMs) {
+          if (stopped || (options.shouldAbort && options.shouldAbort())) {
+            gsap.ticker.remove(tickerMany);
+            finish({ aborted: true, layout });
+            return;
+          }
+          const delta = Math.min(0.05, (deltaMs || 16) / 1000);
+          const bases = plans.map((plan, index) => {
+            clocks[index] += delta * rate;
+            return sampleAt(plan, clocks[index]);
+          });
+          for (let i = 0; i < offsets.length; i += 1) {
+            if (bases[i].done) {
+              offsets[i].x = 0;
+              offsets[i].y = 0;
+              continue;
+            }
+            offsets[i].x *= 0.985;
+            offsets[i].y *= 0.985;
+          }
+          const maxStep = 1.4;
+          for (let i = 0; i < bases.length; i += 1) {
+            if (bases[i].done) continue;
+            for (let j = i + 1; j < bases.length; j += 1) {
+              if (bases[j].done) continue;
+              let dx = bases[j].x + offsets[j].x - (bases[i].x + offsets[i].x);
+              let dy = bases[j].y + offsets[j].y - (bases[i].y + offsets[i].y);
+              let dist = Math.hypot(dx, dy);
+              if (dist >= minDist) continue;
+              if (dist < 0.001) {
+                dx = 1;
+                dy = 0.2;
+                dist = Math.hypot(dx, dy);
+              }
+              const push = Math.min((minDist - dist) / 2, maxStep);
+              const nx = dx / dist;
+              const ny = dy / dist;
+              offsets[i].x -= nx * push;
+              offsets[i].y -= ny * push;
+              offsets[j].x += nx * push;
+              offsets[j].y += ny * push;
+            }
+          }
+          for (let i = 0; i < positions.length; i += 1) {
+            positions[i].x = clamp(bases[i].x + offsets[i].x, CFG.margin + radius, layout.width - CFG.margin - radius);
+            positions[i].y = clamp(bases[i].y + offsets[i].y, radius, layout.height - radius);
+            positions[i].rot = bases[i].rot;
+            const pocket = pockets[i];
+            if (!tucked[i] && pocket && Math.abs(positions[i].x - pocket.x) < pocket.w / 2 - 2 && positions[i].y > pocket.y + 4) {
+              tucked[i] = true;
+              justSettled = { x: positions[i].x, y: positions[i].y };
+              nodes[i].classList.add('is-behind');
+              trails[i].classList.add('is-behind');
+              const sign = host.querySelector(`.plinko-pocket[data-id="${CSS.escape(String(pocket.id))}"]`);
+              if (sign) {
+                sign.classList.add('is-win');
+                sign.style.borderColor = specs[i].color;
+                sign.style.boxShadow = `inset 0 0 0 2px ${specs[i].color}, 0 0 18px ${specs[i].color}`;
+              }
+            }
+            const hist = histories[i];
+            hist.push({ x: positions[i].x, y: positions[i].y });
+            if (hist.length > 5) hist.shift();
+            const dots = trails[i].querySelectorAll('i');
+            for (let d = 0; d < dots.length; d += 1) {
+              const point = hist[hist.length - 1 - d];
+              if (!point) {
+                dots[d].style.opacity = '0';
+                continue;
+              }
+              dots[d].style.opacity = String(0.42 - d * 0.07);
+              dots[d].style.transform = `translate(${point.x}px, ${point.y}px)`;
+            }
+            const idx = Math.floor(Math.max(0, clocks[i]) / plans[i].dt);
+            while (cursors[i] < plans[i].hits.length && plans[i].hits[cursors[i]].i <= idx) {
+              const peg = pegNodes[plans[i].hits[cursors[i]].peg];
+              if (peg) peg.classList.add('is-hot');
+              const hot = peg;
+              gsap.delayedCall(0.34, () => { if (hot) hot.classList.remove('is-hot'); });
+              cursors[i] += 1;
+            }
+          }
+          paintMany();
+          const view = frameBalls(delta);
+          applyCamera(world, view.cam, view.scale, view.offsetX);
+          if (!arrived && bases.every((point) => point.done)) {
+            arrived = true;
+            gsap.ticker.remove(tickerMany);
+            landingHold = gsap.delayedCall(0.75, () => {
+              if (stopped || (options.shouldAbort && options.shouldAbort())) {
+                finish({ aborted: true, layout });
+                return;
+              }
+              finishMany();
+            });
+          }
+        };
+        gsap.ticker.add(tickerMany);
+      }
+
+      const ballSpecs = Array.isArray(options.balls) && options.balls.length
+        ? options.balls
+        : [{ winnerId, color: '#FFC354', seed: options.seed || winnerId || 'area' }];
+      if (ballSpecs.length > 1) {
+        runBalls(ballSpecs);
+        return;
       }
 
       const plan = planDrop(layout, winnerId, options.seed || winnerId || 'area');
@@ -1005,7 +1299,7 @@
     });
   }
 
-  const api = { layoutBoard, planDrop, play, syncDim, hashString };
+  const api = { layoutBoard, planDrop, play, syncDim, hashString, separateBalls };
   if (typeof window !== 'undefined') window.PlinkoAnim = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

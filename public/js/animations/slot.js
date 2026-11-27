@@ -153,6 +153,109 @@
       .replace(/"/g, '&quot;');
   }
 
+  function scheduleUnify(row) {
+    if (row._slotUnify) return;
+    row._slotUnify = true;
+    queueMicrotask(() => {
+      row._slotUnify = false;
+      const windows = [...row.querySelectorAll('.slot-window')].filter((host) => host.isConnected && host._slotColumns);
+      if (windows.length) unifyWindows(windows);
+    });
+  }
+
+  function unifyWindows(windows) {
+    const holder = document.createElement('div');
+    holder.className = 'slot-strip';
+    holder.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;pointer-events:none;';
+    const probe = document.createElement('div');
+    probe.className = 'name';
+    probe.style.cssText = 'position:relative;width:max-content;height:auto;line-height:normal;white-space:nowrap;';
+    holder.appendChild(probe);
+    document.body.appendChild(holder);
+    const reference = 2.35;
+    function measure(word, rem) {
+      probe.style.fontSize = `${rem}rem`;
+      probe.textContent = word || '';
+      return Math.ceil(probe.getBoundingClientRect().width);
+    }
+    function winnerOf(host) {
+      return (host._slotColumns || []).map((col) => {
+        const last = col[col.length - 1];
+        return (last && last.word) || '';
+      });
+    }
+    function spaceOf(host) {
+      const box = host.querySelector('.slot-reels');
+      const style = box ? getComputedStyle(box) : null;
+      const gapPx = style ? parseFloat(style.columnGap) || 8 : 8;
+      const pad = style ? (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0) : 0;
+      return { gapPx, available: Math.max(0, host.clientWidth - pad - 4) };
+    }
+    function rowWidth(widths, start, end, gapPx) {
+      let used = 0;
+      for (let i = start; i < end; i += 1) {
+        if (!widths[i]) continue;
+        used += widths[i] + (used ? gapPx : 0);
+      }
+      return used;
+    }
+    function pack(words, rem, available, gapPx) {
+      const widths = words.map((word) => (word ? measure(word, rem) : 0));
+      const widest = widths.length ? Math.max(...widths) : 0;
+      const count = widths.length;
+      if (!count || widest > available) return { lines: 99, split: 0, widest };
+      if (count === 1 || rowWidth(widths, 0, count, gapPx) <= available) {
+        return { lines: 1, split: 0, widest };
+      }
+      let best = null;
+      for (let cut = 1; cut < count; cut += 1) {
+        const left = rowWidth(widths, 0, cut, gapPx);
+        const right = rowWidth(widths, cut, count, gapPx);
+        if (left > available || right > available) continue;
+        const balance = Math.abs(cut - (count - cut));
+        if (!best || balance < best.balance) best = { lines: 2, split: cut, widest, balance };
+      }
+      return best || { lines: 99, split: 0, widest };
+    }
+    let size = reference;
+    while (size > 1.45) {
+      const fits = windows.every((host) => {
+        const room = spaceOf(host);
+        if (room.available < 48) return true;
+        const laid = pack(winnerOf(host), size, room.available, room.gapPx);
+        return laid.lines <= 2;
+      });
+      if (fits) break;
+      size = Math.round((size - 0.06) * 1000) / 1000;
+    }
+    const label = `${size.toFixed(3)}rem`;
+    windows.forEach((host) => {
+      host.style.setProperty('--slot-size', label);
+      const words = winnerOf(host);
+      const room = spaceOf(host);
+      const laid = pack(words, size, room.available, room.gapPx);
+      const reels = [...host.querySelectorAll('.slot-reel')];
+      if (laid.split > 0 && reels[laid.split]) {
+        const breakLine = document.createElement('span');
+        breakLine.className = 'slot-break';
+        reels[laid.split].before(breakLine);
+      }
+      reels.forEach((reel, index) => {
+        const width = Math.max(measure(words[index], size), 8);
+        reel.style.flex = '0 0 auto';
+        reel.style.width = `${width}px`;
+        reel.querySelectorAll('.name').forEach((el) => {
+          el.style.transform = '';
+          el.style.transformOrigin = 'center center';
+          if (el.textContent && el.scrollWidth > width + 1) {
+            el.style.transform = `scaleX(${(width / el.scrollWidth).toFixed(3)})`;
+          }
+        });
+      });
+    });
+    holder.remove();
+  }
+
   function fitReels(host, reelEls, columns) {
     const probe = document.createElement('div');
     probe.className = 'name';
@@ -178,7 +281,8 @@
     let widths = measure(size);
     let total = totalOf(widths);
     const machine = host.closest ? host.closest('.slot-machine') : null;
-    if (machine) {
+    const batched = machine && machine.parentElement && machine.parentElement.classList.contains('slot-row');
+    if (machine && !batched) {
       const chrome = Math.max(0, machine.clientWidth - host.clientWidth);
       const maxCard = Math.min(window.innerWidth * 0.94, 1200);
       const card = Math.max(520, Math.min(maxCard, Math.ceil(total + chrome + 16)));
@@ -236,10 +340,13 @@
       return strip;
     });
     host.appendChild(wrap);
-    fitReels(host, reelEls, columns);
+    host._slotColumns = columns;
+    const batched = machine && machine.parentElement && machine.parentElement.classList.contains('slot-row');
+    if (batched) scheduleUnify(machine.parentElement);
+    else fitReels(host, reelEls, columns);
 
     const sample = strips[0] && strips[0].querySelector('.name');
-    const row = (sample && sample.offsetHeight) || 72;
+    const row = (sample && sample.getBoundingClientRect().height) || 72;
     const stops = columns.map((col) => Math.max(0, col.length - 1));
     const start = Math.min(2, prefixEnd);
     const positions = columns.map(() => start);

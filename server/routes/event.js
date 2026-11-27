@@ -3,7 +3,7 @@
 const express = require('express');
 const { getDb, getActiveEventId, getEvent } = require('../db');
 const { assessViability, applyCuotaOnStart, canDrawNow } = require('../services/sistemasQuota');
-const { getSorteoById } = require('../services/drawEngine');
+const { getSorteoById, readCurrentLote } = require('../services/drawEngine');
 const { computeProbabilities } = require('../services/probabilities');
 
 const router = express.Router();
@@ -60,6 +60,7 @@ router.get('/snapshot', (_req, res) => {
       entregados,
     },
     sorteoActual,
+    lote: readCurrentLote(),
     canDraw: event?.estado === 'en_curso' ? canDrawNow() : { ok: false },
   });
 });

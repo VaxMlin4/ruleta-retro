@@ -11,7 +11,13 @@ function normalizeAreaName(name) {
 
 function isSistemasArea(name) {
   const n = normalizeAreaName(name);
-  return n === 'sistemas' || n === 'ti' || n === 'tecnologias de la informacion' || n === 'sistemas ti';
+  return (
+    n === 'sistemas de informacion' ||
+    n === 'sistemas' ||
+    n === 'ti' ||
+    n === 'tecnologias de la informacion' ||
+    n === 'sistemas ti'
+  );
 }
 
 function validateEmpleados(rows) {

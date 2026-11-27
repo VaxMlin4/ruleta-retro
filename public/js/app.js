@@ -7,6 +7,7 @@
     snapshot: null,
     prep: null,
     currentSorteo: null,
+    currentLote: null,
     animating: false,
     replayMode: false,
     abortAnim: false,
@@ -234,10 +235,16 @@
       }
       if (ev.estado === 'en_curso') {
         await refreshSnapshot();
-        if (ev.animacionEnCurso && ev.sorteoActualId) {
-          state.currentSorteo = state.snapshot.sorteoActual;
+        if (ev.animacionEnCurso && (state.snapshot.lote || []).length) {
+          state.currentLote = state.snapshot.lote;
+          state.currentSorteo = state.snapshot.lote[0];
           state.replayMode = true;
-          show('ui3', { sorteo: state.currentSorteo, replay: true });
+          show('ui3', { lote: state.currentLote, sorteo: state.currentSorteo, replay: true });
+        } else if (ev.animacionEnCurso && ev.sorteoActualId) {
+          state.currentSorteo = state.snapshot.sorteoActual;
+          state.currentLote = state.currentSorteo ? [state.currentSorteo] : null;
+          state.replayMode = true;
+          show('ui3', { lote: state.currentLote, sorteo: state.currentSorteo, replay: true });
         } else {
           await beginRaffle();
         }
@@ -301,9 +308,10 @@
         show('ui1', { phase: 'C' });
         return;
       }
-      state.currentSorteo = result;
+      state.currentLote = result.lote && result.lote.length ? result.lote : [result];
+      state.currentSorteo = state.currentLote[0];
       await refreshSnapshot();
-      show('ui3', { sorteo: result });
+      show('ui3', { lote: state.currentLote, sorteo: state.currentSorteo });
     } catch (e) {
       state.animating = false;
       state.marathon = false;
@@ -343,7 +351,7 @@
     state.replayMode = true;
     state.animating = true;
     state.abortAnim = false;
-    show('ui3', { sorteo: state.currentSorteo, replay: true });
+    show('ui3', { lote: state.currentLote, sorteo: state.currentSorteo, replay: true });
   }
 
   async function continueAfterCelebration(opts = {}) {
@@ -410,6 +418,7 @@
     if (!b) return;
     await API.reset();
     state.currentSorteo = null;
+    state.currentLote = null;
     state.animating = false;
     state.marathon = false;
     state.prep = await API.prepStatus();
@@ -420,15 +429,15 @@
   window.AppFlow = {
     afterPrize() {
       if (state.abortAnim) return;
-      show('ui4', { sorteo: state.currentSorteo });
+      show('ui4', { lote: state.currentLote, sorteo: state.currentSorteo });
     },
     afterArea() {
       if (state.abortAnim) return;
-      show('ui5', { sorteo: state.currentSorteo });
+      show('ui5', { lote: state.currentLote, sorteo: state.currentSorteo });
     },
     afterEmployee() {
       if (state.abortAnim) return;
-      show('ui6', { sorteo: state.currentSorteo });
+      show('ui6', { lote: state.currentLote, sorteo: state.currentSorteo });
     },
   };
 

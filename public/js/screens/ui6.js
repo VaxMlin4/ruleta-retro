@@ -12,19 +12,14 @@ window.UI6 = {
       <div class="disco-ball"></div>
       <div class="disco-floor"></div>
       <div class="screen-content" id="ui6-content">
-        <div class="glow-card celeb-card" id="ui6-card">
-          <p class="eyebrow">¡Felicidades!</p>
-          <p class="winner-name" id="ui6-name">—</p>
-          <p class="area-line" id="ui6-area">Área</p>
-          <p class="prize-line" id="ui6-prize">Premio</p>
-          <p class="celeb-next" id="ui6-next" hidden>El siguiente premio comienza solo.</p>
-          <div class="celeb-meter" id="ui6-meter" hidden>
-            <span id="ui6-meter-fill"></span>
-          </div>
-          <div class="celeb-actions">
-            <button type="button" class="btn btn-primary lg" id="ui6-continue">Continuar</button>
-            <button type="button" class="btn btn-ghost" id="ui6-replay">Ver de nuevo</button>
-          </div>
+        <div class="celeb-row" id="ui6-cards"></div>
+        <p class="celeb-next" id="ui6-next" hidden>El siguiente premio comienza solo.</p>
+        <div class="celeb-meter" id="ui6-meter" hidden>
+          <span id="ui6-meter-fill"></span>
+        </div>
+        <div class="celeb-actions">
+          <button type="button" class="btn btn-primary lg" id="ui6-continue">Continuar</button>
+          <button type="button" class="btn btn-ghost" id="ui6-replay">Ver de nuevo</button>
         </div>
       </div>
       <footer class="app-footer">
@@ -45,14 +40,24 @@ window.UI6 = {
     };
 
     async function onShow(opts = {}) {
-      const sorteo = opts.sorteo || app.state.currentSorteo;
+      const lote = activeLote(opts, app);
+      const sorteo = lote[0] || opts.sorteo || app.state.currentSorteo;
       if (!sorteo) {
         app.beginRaffle();
         return;
       }
-      el.querySelector('#ui6-name').textContent = sorteo.empleado.nombre;
-      el.querySelector('#ui6-area').textContent = `Área: ${sorteo.area.nombre}`;
-      el.querySelector('#ui6-prize').textContent = `Premio: ${sorteo.premio.nombre}`;
+      const cards = el.querySelector('#ui6-cards');
+      cards.dataset.count = String(lote.length);
+      cards.innerHTML = lote
+        .map(
+          (item) => `<article class="glow-card celeb-card" style="--draw-color:${item.color}">
+            <p class="eyebrow">¡Felicidades!</p>
+            <p class="winner-name">${escapeHtml(item.empleado && item.empleado.nombre)}</p>
+            <p class="area-line">Área: ${escapeHtml(item.area && item.area.nombre)}</p>
+            <p class="prize-line">Premio: ${escapeHtml(item.premio && item.premio.nombre)}</p>
+          </article>`
+        )
+        .join('');
       CelebrationAnim.burst(el.querySelector('#ui6-content'));
 
       const epoch = ++app.state.ui6Epoch;
@@ -82,6 +87,14 @@ window.UI6 = {
     return { el, onShow };
   },
 };
+
+function escapeHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

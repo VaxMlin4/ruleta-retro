@@ -8,7 +8,7 @@ const OUT = path.join(__dirname, '..', 'templates');
 fs.mkdirSync(OUT, { recursive: true });
 
 const AREAS = [
-  'Sistemas',
+  'Sistemas de Información',
   'Recursos Humanos',
   'Finanzas',
   'Ventas',
@@ -41,13 +41,13 @@ async function buildParticipantes() {
   ];
 
   let n = 0;
-  // Sistemas: 8 personas (cuota 4–5 viable)
+  // Sistemas de Información: 8 personas (cuota 2–3 viable)
   for (let i = 0; i < 8; i++) {
     n++;
     ws.addRow({
       id: `E${String(n).padStart(3, '0')}`,
       nombre: `${first[i % first.length]} ${last[i % last.length]} Sis${n}`,
-      area: 'Sistemas',
+      area: 'Sistemas de Información',
     });
   }
   // Otras áreas: total ~60 colaboradores (nombres únicos)
@@ -81,7 +81,7 @@ async function buildPremios() {
     { id: 'P05', nombre: 'Licuadoras', cantidad: 3 },
     { id: 'P06', nombre: 'Otros premios', cantidad: 6 },
   ];
-  // Total unidades = 20; elegibles 60 ≥ 20; Sistemas cuota 4–5 OK
+  // Total unidades = 20; elegibles 60 ≥ 20; Sistemas de Información cuota 2–3 OK
   for (const it of items) ws.addRow(it);
   await wb.xlsx.writeFile(path.join(OUT, 'premios.xlsx'));
   console.log('templates/premios.xlsx —', items.length, 'tipos,', items.reduce((s, i) => s + i.cantidad, 0), 'unidades');

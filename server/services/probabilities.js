@@ -34,14 +34,14 @@ function computeProbabilities(cuotaHint) {
     esSistemas: a.esSistemas,
     probabilidad: totalEleg ? a.elegibles / totalEleg : 0,
     nota: a.esSistemas
-      ? `Sujeta a cuota Sistemas (${viability.cuotaRango}). No se favorece por ser chica.`
+      ? `Sujeta a cuota Sistemas de Información (${viability.cuotaRango}). No se favorece por ser chica.`
       : 'Ponderada por nº de elegibles (áreas grandes tienen más peso).',
   }));
 
   return {
     modelo:
-      '1) Premio ponderado por unidades disponibles. 2) Área ponderada por elegibles actuales (Sistemas excluida al alcanzar cuota). 3) Colaborador uniforme dentro del área.',
-    aviso: 'Las áreas NO tienen la misma probabilidad. Sistemas tiene cuota 4–5, no ventaja por tamaño pequeño.',
+      '1) Premio ponderado por unidades disponibles. 2) Área ponderada por elegibles actuales (Sistemas de Información excluida al alcanzar cuota). 3) Colaborador uniforme dentro del área.',
+    aviso: 'Las áreas NO tienen la misma probabilidad. Sistemas de Información tiene cuota 2–3, no ventaja por tamaño pequeño.',
     cuotaSistemas: viability.cuotaRango,
     elegibles: viability.elegibles,
     unidades: viability.unidades,

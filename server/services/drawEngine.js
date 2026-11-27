@@ -45,14 +45,30 @@ function loadPools(event) {
       return (event.sistemas_ganadores || 0) < event.sistemas_cuota_objetivo;
     });
   }
-  if (!eligibleAreas.length) throw new Error('No hay áreas elegibles (cuota Sistemas u otras).');
+  if (!eligibleAreas.length) throw new Error('No hay áreas elegibles (cuota Sistemas de Información u otras).');
 
   return { premios, areas: eligibleAreas };
 }
 
-function pickPrizeAreaEmployeePreview(event) {
-  const { premios, areas } = loadPools(event);
-  const premio = weightedPick(premios, (p) => p.cantidad_disponible);
+const BATCH_COLORS = ['#FFC354', '#F47D20', '#912C70'];
+
+function pickPrizeAreaEmployeePreview(event, options = {}) {
+  const exclude = new Set(options.excludeAreaIds || []);
+  const loaded = loadPools(event);
+  let areas = loaded.areas;
+  if (exclude.size) {
+    const filtered = areas.filter((a) => !exclude.has(a.id));
+    if (!filtered.length) {
+      if (options.requireDistinctArea) return null;
+    } else {
+      areas = filtered;
+    }
+  }
+  if (!areas.length) {
+    if (options.requireDistinctArea) return null;
+    throw new Error('No hay áreas elegibles (cuota Sistemas de Información u otras).');
+  }
+  const premio = weightedPick(loaded.premios, (p) => p.cantidad_disponible);
   const area = weightedPick(areas, (a) => a.elegibles);
   const empleados = getDb()
     .prepare('SELECT * FROM empleados WHERE area_id = ? AND elegible = 1')
@@ -61,11 +77,50 @@ function pickPrizeAreaEmployeePreview(event) {
   return { premio, area, empleado };
 }
 
+function saveLote(db, ids) {
+  db.prepare(
+    `INSERT INTO meta (clave, valor) VALUES ('lote_actual', ?)
+     ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`
+  ).run(JSON.stringify(ids));
+}
+
+function clearLote(db) {
+  db.prepare(`DELETE FROM meta WHERE clave = 'lote_actual'`).run();
+}
+
+function readCurrentLote() {
+  const db = getDb();
+  const row = db.prepare(`SELECT valor FROM meta WHERE clave = 'lote_actual'`).get();
+  if (!row || !row.valor) return [];
+  let ids = [];
+  try {
+    ids = JSON.parse(row.valor);
+  } catch (_) {
+    ids = [];
+  }
+  if (!Array.isArray(ids)) return [];
+  return ids
+    .map((id, index) => {
+      const sorteo = getSorteoById(id);
+      if (!sorteo) return null;
+      return Object.assign({}, sorteo, { color: BATCH_COLORS[index % BATCH_COLORS.length] });
+    })
+    .filter(Boolean);
+}
+
 /**
  * Ejecuta un sorteo real en transacción.
  * Si falla, NO marca éxito (rollback + limpia candado).
  */
 function executeDraw() {
+  return executeDrawBatch(1);
+}
+
+/**
+ * Hasta `count` sorteos en una sola transacción.
+ * Cada uno sale de un área distinta. Si ya no hay áreas, premios o personas, el lote se corta.
+ */
+function executeDrawBatch(count = 3) {
   const db = getDb();
   const eventId = getActiveEventId();
   const event = getEvent(eventId);
@@ -93,67 +148,92 @@ function executeDraw() {
   }
 
   try {
-    const result = runTransaction((db) => {
-      const fresh = getEvent(eventId);
-      const pick = pickPrizeAreaEmployeePreview(fresh);
+    const lote = runTransaction((db) => {
+      const drawn = [];
+      const usedAreas = [];
+      const wanted = Math.max(1, Math.min(3, Number(count) || 1));
+      for (let i = 0; i < wanted; i += 1) {
+        const stock = db
+          .prepare('SELECT COALESCE(SUM(cantidad_disponible), 0) AS c FROM premios')
+          .get();
+        if (!stock || stock.c <= 0) break;
+        const fresh = getEvent(eventId);
+        let pick = null;
+        try {
+          pick = pickPrizeAreaEmployeePreview(fresh, {
+            excludeAreaIds: usedAreas,
+            requireDistinctArea: true,
+          });
+        } catch (err) {
+          if (drawn.length) break;
+          throw err;
+        }
+        if (!pick) break;
 
-      const updPremio = db
-        .prepare(
-          `UPDATE premios SET cantidad_disponible = cantidad_disponible - 1
-           WHERE id = ? AND cantidad_disponible > 0`
-        )
-        .run(pick.premio.id);
-      if (updPremio.changes === 0) throw new Error('Inventario de premio inconsistente.');
+        const updPremio = db
+          .prepare(
+            `UPDATE premios SET cantidad_disponible = cantidad_disponible - 1
+             WHERE id = ? AND cantidad_disponible > 0`
+          )
+          .run(pick.premio.id);
+        if (updPremio.changes === 0) throw new Error('Inventario de premio inconsistente.');
 
-      const updEmp = db
-        .prepare(
-          `UPDATE empleados SET elegible = 0, atenuado = 1
-           WHERE id = ? AND elegible = 1`
-        )
-        .run(pick.empleado.id);
-      if (updEmp.changes === 0) throw new Error('Colaborador ya no elegible.');
+        const updEmp = db
+          .prepare(
+            `UPDATE empleados SET elegible = 0, atenuado = 1
+             WHERE id = ? AND elegible = 1`
+          )
+          .run(pick.empleado.id);
+        if (updEmp.changes === 0) throw new Error('Colaborador ya no elegible.');
 
-      let sistemasGanadores = fresh.sistemas_ganadores || 0;
-      if (pick.area.es_sistemas) sistemasGanadores += 1;
+        let sistemasGanadores = fresh.sistemas_ganadores || 0;
+        if (pick.area.es_sistemas) sistemasGanadores += 1;
 
-      const seqRow = db
-        .prepare('SELECT COALESCE(MAX(secuencia), 0) AS m FROM sorteos WHERE evento_id = ?')
-        .get(eventId);
-      const secuencia = seqRow.m + 1;
-      const sorteoId = uuidv4();
-      const ahora = new Date().toISOString();
+        const seqRow = db
+          .prepare('SELECT COALESCE(MAX(secuencia), 0) AS m FROM sorteos WHERE evento_id = ?')
+          .get(eventId);
+        const secuencia = seqRow.m + 1;
+        const sorteoId = uuidv4();
+        const ahora = new Date().toISOString();
 
-      db.prepare(
-        `INSERT INTO sorteos (id, evento_id, secuencia, premio_id, area_id, empleado_id, creado_en)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(sorteoId, eventId, secuencia, pick.premio.id, pick.area.id, pick.empleado.id, ahora);
+        db.prepare(
+          `INSERT INTO sorteos (id, evento_id, secuencia, premio_id, area_id, empleado_id, creado_en)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).run(sorteoId, eventId, secuencia, pick.premio.id, pick.area.id, pick.empleado.id, ahora);
 
-      db.prepare(
-        `UPDATE eventos SET sistemas_ganadores = ?, sorteo_en_curso = 0, sorteo_actual_id = ?
-         WHERE id = ?`
-      ).run(sistemasGanadores, sorteoId, eventId);
+        db.prepare(
+          `UPDATE eventos SET sistemas_ganadores = ?, sorteo_en_curso = 0, sorteo_actual_id = ?
+           WHERE id = ?`
+        ).run(sistemasGanadores, sorteoId, eventId);
 
-      return {
-        sorteoId,
-        secuencia,
-        creadoEn: ahora,
-        premio: {
-          id: pick.premio.id,
-          nombre: pick.premio.nombre,
-          restante: pick.premio.cantidad_disponible - 1,
-        },
-        area: { id: pick.area.id, nombre: pick.area.nombre, esSistemas: !!pick.area.es_sistemas },
-        empleado: { id: pick.empleado.id, nombre: pick.empleado.nombre },
-      };
+        usedAreas.push(pick.area.id);
+        drawn.push({
+          sorteoId,
+          secuencia,
+          creadoEn: ahora,
+          color: BATCH_COLORS[drawn.length % BATCH_COLORS.length],
+          premio: {
+            id: pick.premio.id,
+            nombre: pick.premio.nombre,
+            restante: pick.premio.cantidad_disponible - 1,
+          },
+          area: { id: pick.area.id, nombre: pick.area.nombre, esSistemas: !!pick.area.es_sistemas },
+          empleado: { id: pick.empleado.id, nombre: pick.empleado.nombre },
+        });
+      }
+      if (!drawn.length) throw new Error('No hay combinación válida.');
+      saveLote(db, drawn.map((item) => item.sorteoId));
+      return drawn;
     });
 
-    return { ok: true, ...result };
+    return { ok: true, lote, ...lote[0] };
   } catch (err) {
     // Liberar candado sin marcar éxito
     try {
-      db.prepare(
-        `UPDATE eventos SET sorteo_en_curso = 0, animacion_en_curso = 0, sorteo_actual_id = NULL WHERE id = ?`
-      ).run(eventId);
+    db.prepare(
+      `UPDATE eventos SET sorteo_en_curso = 0, animacion_en_curso = 0, sorteo_actual_id = NULL WHERE id = ?`
+    ).run(eventId);
+    clearLote(db);
     } catch (_) {
       /* ignore */
     }
@@ -171,6 +251,7 @@ function releaseAnimationLock() {
   db.prepare(
     `UPDATE eventos SET animacion_en_curso = 0, sorteo_en_curso = 0 WHERE id = ?`
   ).run(eventId);
+  clearLote(db);
 
   // Si no quedan premios → finalizado
   const units = db
@@ -210,9 +291,12 @@ function getSorteoById(sorteoId) {
 
 module.exports = {
   executeDraw,
+  executeDrawBatch,
   releaseAnimationLock,
   pickPrizeAreaEmployeePreview,
   getSorteoById,
+  readCurrentLote,
+  BATCH_COLORS,
   weightedPick,
   uniformPick,
 };

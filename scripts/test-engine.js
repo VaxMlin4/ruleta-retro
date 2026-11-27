@@ -56,7 +56,7 @@ async function main() {
 
   // Build sample data
   const empRows = [];
-  for (let i = 1; i <= 8; i++) empRows.push([`S${i}`, `Sis Persona ${i}`, 'Sistemas']);
+  for (let i = 1; i <= 8; i++) empRows.push([`S${i}`, `Sis Persona ${i}`, 'Sistemas de Información']);
   for (let i = 1; i <= 20; i++) empRows.push([`V${i}`, `Ventas Persona ${i}`, 'Ventas']);
   for (let i = 1; i <= 10; i++) empRows.push([`F${i}`, `Fin Persona ${i}`, 'Finanzas']);
 
@@ -80,7 +80,7 @@ async function main() {
 
   const v = assessViability({ chooseCuota: true });
   assert(v.ok, 'Viabilidad OK');
-  assert(v.cuota === 4 || v.cuota === 5, `Cuota Sistemas 4 o 5 (got ${v.cuota})`);
+  assert(v.cuota === 2 || v.cuota === 3, `Cuota Sistemas de Información 2 o 3 (got ${v.cuota})`);
 
   const start = applyCuotaOnStart(getActiveEventId());
   assert(start.ok, 'Inicio evento OK');

@@ -140,7 +140,9 @@ async function main() {
 
     // Double draw should 409 while locked — first draw
     r = await req('POST', '/api/draw', {});
-    assert(r.status === 200 && r.data.ok, `Primer sorteo: ${r.data.empleado?.nombre} → ${r.data.premio?.nombre}`);
+    assert(r.status === 200 && r.data.ok && r.data.lote && r.data.lote.length >= 1 && r.data.lote.length <= 3, `Primer lote: ${(r.data.lote || []).length} sorteos`);
+    const areasLote = new Set((r.data.lote || []).map((item) => item.area && item.area.id));
+    assert(areasLote.size === (r.data.lote || []).length, 'Áreas distintas dentro del lote');
     const firstId = r.data.sorteoId;
 
     const r2 = await req('POST', '/api/draw', {});
@@ -153,7 +155,7 @@ async function main() {
     await req('POST', '/api/draw/continue', {});
 
     // Drain remaining
-    let draws = 1;
+    let draws = (r.data.lote || []).length;
     for (;;) {
       const snap = await req('GET', '/api/event/snapshot');
       if (snap.data.stats.unidadesDisponibles <= 0) break;
@@ -163,7 +165,7 @@ async function main() {
         assert(false, `Draw falló: ${d.data.message}`);
         break;
       }
-      draws++;
+      draws += (d.data.lote || []).length || 1;
       await req('POST', '/api/draw/continue', {});
     }
     assert(draws >= 1, `Sorteos completados: ${draws}`);
